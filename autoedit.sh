@@ -177,6 +177,9 @@ fi
 
 if [ "$reconfigure" -eq 0 ]; then
 	rm -f "$tmpfile"
+fi
+
+if [ $ecode -eq 0 ]; then
 	rm -f "$fail_file"
 fi
 
