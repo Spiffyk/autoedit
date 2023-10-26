@@ -26,7 +26,9 @@
 # SOFTWARE.
 
 
-set -e
+configure_command='./configure'
+status_exec='./config.status'
+fail_file='./.autoedit-failed'
 
 short_help_text=$(cat << EOF
 USAGE: $0 [options]
@@ -38,22 +40,24 @@ Interactive reconfiguration script for Autotools
 $short_help_text
 
 Available options:
+	-f, --no-failed
+		Do not write into '$fail_file' on configuration failure
+
 	-h, --help
-                Displays this help and exits.
+		Displays this help and exits.
 
 	-r, --reconfigure
-                Reconfigures the project, keeping its current configuration
-                options, without opening the editor.
+		Reconfigures the project, keeping its current configuration
+		options, without opening the editor.
 EOF
 )
 
-configure_command='./configure'
 reconfigure=0
+write_failed=1
 
-set +e
 getopt=$(getopt \
-	--options     'hr'\
-	--longoptions 'help,reconfigure'\
+	--options     'fhr'\
+	--longoptions 'no-failed,help,reconfigure'\
 	--name        'autoedit'\
 	-- "$@")
 
@@ -62,13 +66,17 @@ if [ $? -ne 0 ]; then
 	>&2 echo 'Use --help for more information'
 	exit 1
 fi
-set -e
 
 eval set -- "$getopt"
 unset getopt
 
 while true; do
 	case "$1" in
+		'-f'|'--no-failed')
+			write_failed=0
+			shift
+			continue
+			;;
 		'-h'|'--help')
 			echo "$help_text"
 			exit 0
@@ -103,17 +111,36 @@ if [ "$reconfigure" -eq 0 ]; then
 
 	tmpfile="$(mktemp)"
 
-	if [ -x "./config.status" ]; then
-		./config.status --config >> "$tmpfile"
-		echo -e '\n' >> "$tmpfile"
-		echo $'# [info] \'config.status\' loaded - edit your configuration' >> "$tmpfile"
+	if [ -x "$status_exec" ]; then
+		curr_config="$("$status_exec" --config)"
 	else
-		echo -e '\n' >> "$tmpfile"
-		echo $'# [info] \'config.status\' not found - provide your initial configuration' >> "$tmpfile"
+		curr_config=''
 	fi
 
-	echo -e $'# [hint] put a \'@\' at the beginning of this file to cancel' >> "$tmpfile"
-	echo -e $'# [hint] everything after the first \'#\' on a line is ignored' >> "$tmpfile"
+	if [ -f "$fail_file" ]; then
+		cat "$fail_file" >> "$tmpfile"
+		echo -e '\n' >> "$tmpfile"
+		echo "# [info] '$fail_file' found - edit your failed configuration" >> "$tmpfile"
+
+		if [ -n "$curr_config" ]; then
+			echo "# [info] Last successful configuration was the following:" >> "$tmpfile"
+			echo '#' >> "$tmpfile"
+			echo "#        $curr_config" >> "$tmpfile"
+			echo '#' >> "$tmpfile"
+		fi
+	else
+		if [ -n "$curr_config" ]; then
+			echo "$curr_config" >> "$tmpfile"
+			echo -e '\n' >> "$tmpfile"
+			echo "# [info] '$status_exec' loaded - edit your configuration" >> "$tmpfile"
+		else
+			echo -e '\n' >> "$tmpfile"
+			echo "# [info] '$status_exec' not found - provide your initial configuration" >> "$tmpfile"
+		fi
+	fi
+
+	echo -e $'# [hint] Put a \'@\' at the beginning of this file to cancel.' >> "$tmpfile"
+	echo -e $'# [hint] Everything after the first \'#\' on a line is ignored.' >> "$tmpfile"
 
 	"$EDITOR" "$tmpfile"
 	args=$(grep --only-matching '^[^#]*' "$tmpfile")
@@ -121,22 +148,36 @@ if [ "$reconfigure" -eq 0 ]; then
 	# Cancel if @ is found at the beginning
 	stop_pattern='^[[:space:]]*@'
 	if [[ $args =~ $stop_pattern ]]; then
-		echo '@ found at the beginning of the temp file -- exiting'
+		>&2 echo '@ found at the beginning of the temp file -- exiting'
 		rm -f "$tmpfile"
 		exit 0
 	fi
 else
-	if [ -x "./config.status" ]; then
-		args="$(./config.status --config)"
-		echo $'\'config.status\' loaded - reconfiguring using the provided options'
+	if [ -x "$status_exec" ]; then
+		args="$("$status_exec" --config)"
+		>&2 echo "'$status_exec' loaded - reconfiguring using the provided options"
 	else
 		args=''
-		echo $'\'config.status\' not found - reconfiguring with no options'
+		>&2 echo "'$status_exec' not found - reconfiguring with no options"
 	fi
 fi
 
+ecode=0
 eval "$configure_command $args"
 
-if [ "$reconfigure" -ne 0 ]; then
-	rm -f "$tmpfile"
+if [ $? -ne 0 ]; then
+	if [ $write_failed -ne 0 ]; then
+		>&2 echo "Configuration failed - writing args into '$fail_file'"
+		echo "$args" > "$fail_file"
+	else
+		>&2 echo "Configuration failed - '$fail_file' is disabled, so not writing"
+	fi
+	ecode=2
 fi
+
+if [ "$reconfigure" -eq 0 ]; then
+	rm -f "$tmpfile"
+	rm -f "$fail_file"
+fi
+
+exit "$ecode"
