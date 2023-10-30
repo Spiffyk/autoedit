@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# vim: noet:ts=8:sw=8
 ################################################################################
 # A script for editing GNU Autoconf configuration.
 #
