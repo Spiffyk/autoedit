@@ -42,23 +42,33 @@ $short_help_text
 
 Available options:
 	-f, --no-failed
-		Do not write into '$fail_file' on configuration failure
+		Do not write into '$fail_file' on configuration failure and do
+		not take it into account while loading the current
+		configuration. May be used in conjunction with the
+		-r/--reconfigure option.
 
 	-h, --help
 		Displays this help and exits.
 
 	-r, --reconfigure
 		Reconfigures the project, keeping its current configuration
-		options, without opening the editor.
+		options, without opening the editor. Takes the '$fail_file' into
+		account, if it exists.
+
+	-q, --query
+		Print the current configuration, that would be taken into
+		account by -r/--reconfigure, print it into stdout, and exit
+		without reconfiguring.
 EOF
 )
 
 reconfigure=0
-write_failed=1
+query=0
+fail_journalling=1
 
 getopt=$(getopt \
-	--options     'fhr'\
-	--longoptions 'no-failed,help,reconfigure'\
+	--options     'fhqr'\
+	--longoptions 'no-failed,help,query,reconfigure'\
 	--name        'autoedit'\
 	-- "$@")
 
@@ -74,7 +84,7 @@ unset getopt
 while true; do
 	case "$1" in
 		'-f'|'--no-failed')
-			write_failed=0
+			fail_journalling=0
 			shift
 			continue
 			;;
@@ -84,6 +94,11 @@ while true; do
 			;;
 		'-r'|'--reconfigure')
 			reconfigure=1
+			shift
+			continue
+			;;
+		'-q'|'--query')
+			query=1
 			shift
 			continue
 			;;
@@ -104,7 +119,41 @@ if [ ! -x "$configure_command" ]; then
 	exit 1
 fi
 
-if [ "$reconfigure" -eq 0 ]; then
+curr_config_avail=0
+fail_file_config_avail=0
+
+if [ -x "$status_exec" ]; then
+	curr_config="$("$status_exec" --config)"
+	curr_config_avail=1
+fi
+if [ \( $fail_journalling -ne 0 \) -a \( -f "$fail_file" \) ]; then
+	fail_file_config="$(cat "$fail_file")"
+	fail_file_config_avail=1
+fi
+
+if [ "$query" -ne 0 ]; then
+	if [ $fail_file_config_avail -ne 0 ]; then
+		echo "$fail_file_config"
+	elif [ $curr_config_avail -ne 0 ]; then
+		echo "$curr_config"
+	else
+		>&2 echo "'$status_exec' or '$fail_file' not found - no configuration available"
+		exit 1
+	fi
+
+	exit 0
+elif [ "$reconfigure" -ne 0 ]; then
+	if [ $fail_file_config_avail -ne 0 ]; then
+		args="$fail_file_config"
+		>&2 echo "'$fail_file' loaded - reconfiguring using the last saved options"
+	elif [ $curr_config_avail -ne 0 ]; then
+		args="$curr_config"
+		>&2 echo "'$status_exec' loaded - reconfiguring using the last saved options"
+	else
+		args=''
+		>&2 echo "'$status_exec' or '$fail_file' not found - reconfiguring with no options"
+	fi
+else
 	if [ -z "$EDITOR" ]; then
 		>&2 echo 'No $EDITOR specified.'
 		exit 1
@@ -112,25 +161,19 @@ if [ "$reconfigure" -eq 0 ]; then
 
 	tmpfile="$(mktemp)"
 
-	if [ -x "$status_exec" ]; then
-		curr_config="$("$status_exec" --config)"
-	else
-		curr_config=''
-	fi
-
-	if [ -f "$fail_file" ]; then
-		cat "$fail_file" >> "$tmpfile"
+	if [ $fail_file_config_avail -ne 0 ]; then
+		echo "$fail_file_config" >> "$tmpfile"
 		echo -e '\n' >> "$tmpfile"
-		echo "# [info] '$fail_file' found - edit your failed configuration" >> "$tmpfile"
+		echo "# [info] '$fail_file' loaded - edit your failed configuration" >> "$tmpfile"
 
-		if [ -n "$curr_config" ]; then
+		if [ $curr_config_avail -ne 0 ]; then
 			echo "# [info] Last successful configuration was the following:" >> "$tmpfile"
 			echo '#' >> "$tmpfile"
 			echo "#        $curr_config" >> "$tmpfile"
 			echo '#' >> "$tmpfile"
 		fi
 	else
-		if [ -n "$curr_config" ]; then
+		if [ $curr_config_avail -ne 0 ]; then
 			echo "$curr_config" >> "$tmpfile"
 			echo -e '\n' >> "$tmpfile"
 			echo "# [info] '$status_exec' loaded - edit your configuration" >> "$tmpfile"
@@ -153,21 +196,13 @@ if [ "$reconfigure" -eq 0 ]; then
 		rm -f "$tmpfile"
 		exit 0
 	fi
-else
-	if [ -x "$status_exec" ]; then
-		args="$("$status_exec" --config)"
-		>&2 echo "'$status_exec' loaded - reconfiguring using the provided options"
-	else
-		args=''
-		>&2 echo "'$status_exec' not found - reconfiguring with no options"
-	fi
 fi
 
 ecode=0
 eval "$configure_command $args"
 
 if [ $? -ne 0 ]; then
-	if [ $write_failed -ne 0 ]; then
+	if [ $fail_journalling -ne 0 ]; then
 		>&2 echo "Configuration failed - writing args into '$fail_file'"
 		echo "$args" > "$fail_file"
 	else
