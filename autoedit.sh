@@ -27,7 +27,7 @@
 # SOFTWARE.
 
 
-configure_command='./configure'
+configure_file='./configure'
 status_exec='./config.status'
 fail_file='./.autoedit-failed'
 
@@ -113,11 +113,21 @@ while true; do
 	esac
 done
 
-if [ ! -x "$configure_command" ]; then
-	>&2 echo "'$configure_command' does not exist or it is not executable"
-	>&2 echo "HINT: did you forget to generate it with GNU Autotools?"
-	exit 1
-fi
+orig_pwd="$(pwd)"
+while true; do
+	if [ -x "$configure_file" ]; then
+		configure_command=$(realpath $configure_file)
+		break
+	fi
+	if [ "$(pwd)" = '/' ]; then
+		>&2 echo "'$configure_file' does not exist or it is not executable in this directory or any parent up to '/'"
+		>&2 echo "HINT: did you forget to generate it with GNU Autotools?"
+		exit 1
+	fi
+
+	cd ..
+done
+cd "$orig_pwd"
 
 curr_config_avail=0
 fail_file_config_avail=0
