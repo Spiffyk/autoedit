@@ -27,6 +27,8 @@
 # SOFTWARE.
 
 
+### Constants ###
+
 configure_file='./configure'
 status_exec='./config.status'
 fail_file='./.autoedit-failed'
@@ -62,9 +64,15 @@ Available options:
 EOF
 )
 
+
+### Argument values ###
+
 reconfigure=0
 query=0
 fail_journalling=1
+
+
+### Retrieve values from arguments ###
 
 getopt=$(getopt \
 	--options     'fhqr'\
@@ -113,6 +121,9 @@ while true; do
 	esac
 done
 
+
+### Resolve project path ###
+
 orig_pwd="$(pwd)"
 while true; do
 	if [ -x "$configure_file" ]; then
@@ -129,6 +140,9 @@ while true; do
 done
 cd "$orig_pwd"
 
+
+### Resolve existing and/or journalled configuration ###
+
 curr_config_avail=0
 fail_file_config_avail=0
 
@@ -141,7 +155,12 @@ if [ \( $fail_journalling -ne 0 \) -a \( -f "$fail_file" \) ]; then
 	fail_file_config_avail=1
 fi
 
+
+### Prepare the configuration ###
+
 if [ "$query" -ne 0 ]; then
+	# Only print out the current configuration if available
+
 	if [ $fail_file_config_avail -ne 0 ]; then
 		echo "$fail_file_config"
 	elif [ $curr_config_avail -ne 0 ]; then
@@ -153,6 +172,8 @@ if [ "$query" -ne 0 ]; then
 
 	exit 0
 elif [ "$reconfigure" -ne 0 ]; then
+	# Set up to re-run existing configuration without editing
+
 	if [ $fail_file_config_avail -ne 0 ]; then
 		args="$fail_file_config"
 		>&2 echo "'$fail_file' loaded - reconfiguring using the last saved options"
@@ -164,6 +185,8 @@ elif [ "$reconfigure" -ne 0 ]; then
 		>&2 echo "'$status_exec' or '$fail_file' not found - reconfiguring with no options"
 	fi
 else
+	# Edit the configuration
+
 	if [ -z "$EDITOR" ]; then
 		>&2 echo 'No $EDITOR specified.'
 		exit 1
@@ -208,8 +231,14 @@ else
 	fi
 fi
 
+
+### Configure the project ###
+
 ecode=0
 eval "$configure_command $args"
+
+
+### Handle errors, cleanup, and exit ###
 
 if [ $? -ne 0 ]; then
 	if [ $fail_journalling -ne 0 ]; then
